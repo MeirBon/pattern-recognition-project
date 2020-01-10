@@ -293,12 +293,12 @@ if __name__ == '__main__':
 
             # calculate fid
             fid = calculate_fid(model, images1, images2)
-            print('Epochs: {}, FID: %.3f'.format(current_epochs, fid))
+            print('Epochs: %i, FID: %.3f' % (current_epochs, fid))
             FIDS[id].append([current_epochs, fid])
             del images1, images2, noise
 
     print("FIDs:")
     for num, fids in enumerate(FIDS):
-        print('Network ({}):', )
+        print('Network (%i):' % num)
         for epochs, fid in fids:
-        print("Epochs: {}, FID: {}".format(epochs, fid))
+            print("Epochs: %i, FID: %.3f" % (epochs, fid))
