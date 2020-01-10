@@ -1,6 +1,6 @@
 from __future__ import print_function, division
 
-from tensorflow.keras.datasets import cifar10
+from keras.datasets import cifar10
 from tensorflow.keras.layers import Input, Dense, Reshape, Flatten, Dropout, Concatenate
 from tensorflow.keras.layers import BatchNormalization, Activation, ZeroPadding2D, Embedding
 from tensorflow.keras.layers import LeakyReLU
@@ -17,8 +17,8 @@ sys.path.append(path.join(getcwd(), 'utils'))
 
 # Set rng seeds
 seed_no = 123
+tf.set_random_seed(seed_no)
 np.random.seed(seed_no)
-tf.random.set_seed(seed_no)
 
 # Resolve gpu errors/memory scaling
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
@@ -210,4 +210,4 @@ class CGAN():
 
 if __name__ == '__main__':
     cgan = CGAN()
-    cgan.train(epochs=101, batch_size=32, sample_interval=1)
+    cgan.train(epochs=101, batch_size=128, sample_interval=1)
