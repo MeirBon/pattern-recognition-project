@@ -7,11 +7,14 @@ from tensorflow.keras.layers import LeakyReLU
 from tensorflow.keras.layers import UpSampling2D, Conv2D
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.applications.inception_v3 import InceptionV3, preprocess_input
 from os import path, mkdir, getcwd
+from skimage.transform import resize
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import sys
 import numpy as np
+from scipy.linalg import sqrtm
 
 sys.path.append(path.join(getcwd(), 'utils'))
 
@@ -30,17 +33,48 @@ if not path.exists('images'):
     mkdir('images')
 
 
-class CGAN():
+# scale an array of images to a new size
+def scale_images(images, new_shape):
+    images_list = list()
+    for image in images:
+        # resize with nearest neighbor interpolation
+        new_image = resize(image, new_shape, 0)
+        # store
+        images_list.append(new_image)
+    return np.asarray(images_list)
 
-    def __init__(self):
+
+# calculate frechet inception distance
+def calculate_fid(model, images1, images2):
+    # calculate activations
+    act1 = model.predict(images1)
+    act2 = model.predict(images2)
+    # calculate mean and covariance statistics
+    mu1, sigma1 = act1.mean(axis=0), np.cov(act1, rowvar=False)
+    mu2, sigma2 = act2.mean(axis=0), np.cov(act2, rowvar=False)
+    # calculate sum squared difference between means
+    ssdiff = np.sum((mu1 - mu2) ** 2.0)
+    # calculate sqrt of product between cov
+    covmean = sqrtm(sigma1.dot(sigma2))
+    # check and correct imaginary numbers from sqrt
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+    # calculate score
+    fid = ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean)
+    return fid
+
+
+class CGAN():
+    LATENT_DIM = 200
+    NUM_CLASSES = 10
+
+    def __init__(self, id=""):
         # Input shape
+        self.id = id
         self.img_rows = 32
         self.img_cols = 32
         self.channels = 3
         self.img_shape = (self.img_rows, self.img_cols, self.channels)
-
-        self.latent_dim = 200
-        self.num_classes = 10
 
         optimizer = Adam(0.0002, 0.5)
         # Build and compile the discriminator
@@ -53,7 +87,7 @@ class CGAN():
         # Build the generator
         self.generator = self.build_generator()
         # The generator takes noise as input and generates imgs
-        noise = Input(shape=(self.latent_dim,))
+        noise = Input(shape=(CGAN.LATENT_DIM,))
         label = Input(shape=(1,))
         img = self.generator([noise, label])
 
@@ -71,12 +105,12 @@ class CGAN():
         self.combined.compile(loss=['binary_crossentropy'], optimizer=optimizer)
 
     def build_generator(self):
-        noise = Input(shape=(self.latent_dim,))
-        x1 = Dense(128 * 8 * 8, activation="relu", input_dim=self.latent_dim)(noise)
+        noise = Input(shape=(CGAN.LATENT_DIM,))
+        x1 = Dense(128 * 8 * 8, activation="relu", input_dim=CGAN.LATENT_DIM)(noise)
         x1 = Reshape((8, 8, 128))(x1)
 
         label = Input(shape=(1,), dtype='int32')
-        label_embedding = Flatten()(Embedding(self.num_classes, 8 * 8)(label))
+        label_embedding = Flatten()(Embedding(CGAN.NUM_CLASSES, 8 * 8)(label))
         x2 = Dense(8 * 8, activation="relu")(label_embedding)
         x2 = Reshape((8, 8, 1))(x2)
 
@@ -104,7 +138,7 @@ class CGAN():
         img = Input(shape=self.img_shape)
 
         label = Input(shape=(1,), dtype='int32')
-        label_embedding = Flatten()(Embedding(self.num_classes, 32 * 32 * 3)(label))
+        label_embedding = Flatten()(Embedding(CGAN.NUM_CLASSES, 32 * 32 * 3)(label))
         x2 = Dense(32 * 32 * 3, activation="relu")(label_embedding)
         x2 = Reshape((32, 32, 3))(x2)
         x = Concatenate()([img, x2])
@@ -157,7 +191,7 @@ class CGAN():
                 imgs, labels = x_train[sub_idx], y_train[sub_idx]
 
                 # Sample noise as generator input
-                noise = np.random.normal(0, 1, (batch_size, self.latent_dim))
+                noise = np.random.normal(0, 1, (batch_size, CGAN.LATENT_DIM))
 
                 # Generate a half batch of new images
                 gen_imgs = self.generator.predict([noise, labels])
@@ -178,19 +212,16 @@ class CGAN():
                 g_loss = self.combined.train_on_batch([noise, sampled_labels], valid)
 
                 # Plot the progress
-                print(
-                    "%d (%d) [D loss: %f, acc.: %.2f%%] [G loss: %f]" % (epoch, i, d_loss[0], 100 * d_loss[1], g_loss))
+                print("%d (%d) [D-loss: %f, acc: %.2f%%] [G-loss: %f]" % (epoch, i, d_loss[0], 100 * d_loss[1], g_loss))
 
             # If at save interval => save generated image samples
-
             if epoch % sample_interval == 0:
                 self.sample_images(epoch)
 
     def sample_images(self, epoch):
-
         r, c = 2, 5
-        noise = np.random.normal(0, 1, (r * c, self.latent_dim))
-        sampled_labels = np.arange(0, 10).reshape(-1, 1)
+        noise = np.random.normal(0, 1, (r * c, CGAN.LATENT_DIM))
+        sampled_labels = np.arange(0, r * c).reshape(-1, 1)
         gen_imgs = self.generator.predict([noise, sampled_labels])
 
         # Rescale images 0 - 1
@@ -204,10 +235,70 @@ class CGAN():
                 axs[i, j].axis('off')
                 cnt += 1
         fig.suptitle('epochs = ' + str(epoch))
-        fig.savefig(path.join(getcwd(), 'images', "cifar10_%d_%d.png" % (self.latent_dim, epoch)))
+        fig.savefig(path.join(getcwd(), 'images', "cgan[{}]_cifar10_%d_%d.png".format(id) % (CGAN.LATENT_DIM, epoch)))
         plt.close()
 
 
 if __name__ == '__main__':
-    cgan = CGAN()
-    cgan.train(epochs=101, batch_size=128, sample_interval=1)
+    FIDS = [[] for i in range(3)]
+
+    for id in range(3):
+        cgan = CGAN(str(id))
+
+        for i in range(0, 11):
+            current_epochs = (i + 1) * 10
+            cgan.train(epochs=10, batch_size=128, sample_interval=1)
+
+            # noise = np.random.normal(loc=0, scale=1, size=(1000, 32, 32, 3))
+            # images2 = (noise - np.min(noise)) / (np.max(noise) - np.min(noise))
+
+            numgen = 1000
+            print('generating {} images'.format(numgen))
+            noise = np.random.normal(loc=0, scale=1, size=(numgen, CGAN.LATENT_DIM))
+            sampled_labels = np.arange(0, numgen).reshape(-1, 1)
+            images2 = cgan.generator.predict([noise, sampled_labels])
+            images2 = 0.5 * images2 + 0.5
+
+            # print('load cifar10 images')
+            # (_, _), (images2, _) = cifar10.load_data()
+            # np.random.shuffle(images2)
+            # images2 = images2[:1000]
+
+            # prepare the inception v3 model
+            print('prepare inception v3 model')
+            model = InceptionV3(include_top=False, pooling='avg', input_shape=(299, 299, 3))
+            # load cifar10 images
+            print('load cifar10 images')
+            (_, _), (images1, _) = cifar10.load_data()
+            np.random.shuffle(images1)
+            images1 = images1[:numgen]
+            print('Loaded', images1.shape, images2.shape)
+
+            # convert integer to floating point values
+            print('converting int images to float32')
+            images1 = images1.astype('float32')
+            # images2 = images2.astype('float32')
+            images2 = images2 * 255.0
+
+            # resize images
+            print('resizing images')
+            images1 = scale_images(images1, (299, 299, 3))
+            images2 = scale_images(images2, (299, 299, 3))
+            print('Scaled', images1.shape, images2.shape)
+
+            # pre-process images
+            print('pre-precocessing images')
+            images1 = preprocess_input(images1)
+            images2 = preprocess_input(images2)
+
+            # calculate fid
+            fid = calculate_fid(model, images1, images2)
+            print('Epochs: {}, FID: %.3f'.format(current_epochs, fid))
+            FIDS[id].append([current_epochs, fid])
+            del images1, images2, noise
+
+    print("FIDs:")
+    for num, fids in enumerate(FIDS):
+        print('Network ({}):', )
+        for epochs, fid in fids:
+        print("Epochs: {}, FID: {}".format(epochs, fid))
