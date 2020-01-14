@@ -59,7 +59,7 @@ class CGAN():
     LATENT_DIM = 200
     NUM_CLASSES = 10
 
-    def __init__(self, id=""):
+    def __init__(self, id="", learning_rate=0.0002, beta_1=0.5):
         # Input shape
         self.trained_epochs = 0
         self.id = id
@@ -68,7 +68,7 @@ class CGAN():
         self.channels = 3
         self.img_shape = (self.img_rows, self.img_cols, self.channels)
 
-        optimizer = Adam(0.0002, 0.5)
+        optimizer = Adam(learning_rate=learning_rate, beta_1=beta_1)
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
 
@@ -250,45 +250,50 @@ if __name__ == '__main__':
     print('prepare inception v3 model for Frechet Inception Distance')
     model = InceptionV3(include_top=False, pooling='avg', input_shape=(299, 299, 3))
 
+    learning_rates = [0.0002, 0.0005, 0.001]
+    beta_1s = [0.5, 0.7, 0.9]
+
     for id in range(3):
-        cgan = CGAN(str(id))
+        for lr in learning_rates:
+            for b1 in beta_1s:
+                cgan = CGAN(str(id), lr, b1)
 
-        not_improved_since = 0
-        best_FID_10 = 99999
-
-        while cgan.trained_epochs < 500:
-            cgan.train(epochs=1, batch_size=128, sample_interval=1)
-
-            print('generating {} images'.format(numgen))
-            noise = np.random.normal(loc=0, scale=1, size=(numgen, CGAN.LATENT_DIM))
-            sampled_labels = np.arange(0, numgen).reshape(-1, 1)
-            images2 = cgan.generator.predict([noise, sampled_labels])
-
-            print('resizing images')
-            np.random.shuffle(images1)
-            test_images = np.asarray([resize(image, check_shape, 0) for image in images1[:numgen]])
-            images2 = np.asarray([resize(image, check_shape, 0) for image in ((0.5 * images2 + 0.5) * 255.0)])
-
-            # pre-process images
-            print('pre-processing images')
-            test_images = preprocess_input(test_images)
-            images2 = preprocess_input(images2)
-
-            # calculate fid
-            fid = calculate_fid(model, test_images, images2)
-            print('Epochs: %i, FID: %.3f' % (cgan.trained_epochs, fid))
-            FIDs[id].append([cgan.trained_epochs, fid])
-
-            del images2, noise
-
-            if best_FID_10 > fid:
                 not_improved_since = 0
-                best_FID_10 = fid
-            else:
-                not_improved_since += 1
+                best_FID_10 = 99999
 
-            if not_improved_since >= 10:
-                break
+                while cgan.trained_epochs < 150:
+                    cgan.train(epochs=1, batch_size=128, sample_interval=1)
+
+                    print('generating {} images'.format(numgen))
+                    noise = np.random.normal(loc=0, scale=1, size=(numgen, CGAN.LATENT_DIM))
+                    sampled_labels = np.arange(0, numgen).reshape(-1, 1)
+                    images2 = cgan.generator.predict([noise, sampled_labels])
+
+                    print('resizing images')
+                    np.random.shuffle(images1)
+                    test_images = np.asarray([resize(image, check_shape, 0) for image in images1[:numgen]])
+                    images2 = np.asarray([resize(image, check_shape, 0) for image in ((0.5 * images2 + 0.5) * 255.0)])
+
+                    # pre-process images
+                    print('pre-processing images')
+                    test_images = preprocess_input(test_images)
+                    images2 = preprocess_input(images2)
+
+                    # calculate fid
+                    fid = calculate_fid(model, test_images, images2)
+                    print('Epochs: %i, FID: %.3f' % (cgan.trained_epochs, fid))
+                    FIDs[id].append([cgan.trained_epochs, fid])
+
+                    del images2, noise
+
+                    if best_FID_10 > fid:
+                        not_improved_since = 0
+                        best_FID_10 = fid
+                    else:
+                        not_improved_since += 1
+
+                    if not_improved_since >= 10:
+                        break
 
     print("FIDs:")
     for num, fids in enumerate(FIDs):
