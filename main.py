@@ -33,17 +33,6 @@ if not path.exists('images'):
     mkdir('images')
 
 
-# scale an array of images to a new size
-def scale_images(images, new_shape):
-    images_list = list()
-    for image in images:
-        # resize with nearest neighbor interpolation
-        new_image = resize(image, new_shape, 0)
-        # store
-        images_list.append(new_image)
-    return np.asarray(images_list)
-
-
 # calculate frechet inception distance
 def calculate_fid(model, images1, images2):
     # calculate activations
@@ -70,6 +59,7 @@ class CGAN():
 
     def __init__(self, id=""):
         # Input shape
+        self.trained_epochs = 0
         self.id = id
         self.img_rows = 32
         self.img_cols = 32
@@ -212,7 +202,9 @@ class CGAN():
                 g_loss = self.combined.train_on_batch([noise, sampled_labels], valid)
 
                 # Plot the progress
-                print("%d (%d) [D-loss: %f, acc: %.2f%%] [G-loss: %f]" % (epoch, i, d_loss[0], 100 * d_loss[1], g_loss))
+                print("%d (%d) [D-loss: %f, acc: %.2f%%] [G-loss: %f]" % (self.trained_epochs, i, d_loss[0], 100 * d_loss[1], g_loss))
+
+            self.trained_epochs += 1
 
             # If at save interval => save generated image samples
             if epoch % sample_interval == 0:
@@ -242,60 +234,58 @@ class CGAN():
 if __name__ == '__main__':
     FIDS = [[] for i in range(3)]
 
+    compare_FIDs = True
+    numgen = 1000
+    check_shape = (299, 299, 3)
+
+    print('load cifar10 images')
+    (_, _), (images1, _) = cifar10.load_data()
+    print('converting images to float32')
+    images1 = images1.astype('float32')
+
     for id in range(3):
         cgan = CGAN(str(id))
 
-        for i in range(0, 11):
-            current_epochs = (i + 1) * 10
-            cgan.train(epochs=10, batch_size=128, sample_interval=1)
+        not_improved_since = 0
+        best_FID_10 = 99999
 
-            # noise = np.random.normal(loc=0, scale=1, size=(1000, 32, 32, 3))
-            # images2 = (noise - np.min(noise)) / (np.max(noise) - np.min(noise))
+        while cgan.trained_epochs < 200:
+            cgan.train(epochs=1, batch_size=128, sample_interval=1)
 
-            numgen = 1000
             print('generating {} images'.format(numgen))
             noise = np.random.normal(loc=0, scale=1, size=(numgen, CGAN.LATENT_DIM))
             sampled_labels = np.arange(0, numgen).reshape(-1, 1)
             images2 = cgan.generator.predict([noise, sampled_labels])
-            images2 = 0.5 * images2 + 0.5
-
-            # print('load cifar10 images')
-            # (_, _), (images2, _) = cifar10.load_data()
-            # np.random.shuffle(images2)
-            # images2 = images2[:1000]
 
             # prepare the inception v3 model
-            print('prepare inception v3 model')
+            print('prepare inception v3 model for Frechet Inception Distance')
             model = InceptionV3(include_top=False, pooling='avg', input_shape=(299, 299, 3))
-            # load cifar10 images
-            print('load cifar10 images')
-            (_, _), (images1, _) = cifar10.load_data()
-            np.random.shuffle(images1)
-            images1 = images1[:numgen]
-            print('Loaded', images1.shape, images2.shape)
 
-            # convert integer to floating point values
-            print('converting int images to float32')
-            images1 = images1.astype('float32')
-            # images2 = images2.astype('float32')
-            images2 = images2 * 255.0
-
-            # resize images
             print('resizing images')
-            images1 = scale_images(images1, (299, 299, 3))
-            images2 = scale_images(images2, (299, 299, 3))
-            print('Scaled', images1.shape, images2.shape)
+            np.random.shuffle(images1)
+            test_images = np.asarray([resize(image, check_shape, 0) for image in images1[:numgen]])
+            images2 = np.asarray([resize(image, check_shape, 0) for image in ((0.5 * images2 + 0.5) * 255.0)])
 
             # pre-process images
-            print('pre-precocessing images')
-            images1 = preprocess_input(images1)
+            print('pre-processing images')
+            test_images = preprocess_input(test_images)
             images2 = preprocess_input(images2)
 
             # calculate fid
-            fid = calculate_fid(model, images1, images2)
-            print('Epochs: %i, FID: %.3f' % (current_epochs, fid))
-            FIDS[id].append([current_epochs, fid])
-            del images1, images2, noise
+            fid = calculate_fid(model, test_images, images2)
+            print('Epochs: %i, FID: %.3f' % (cgan.trained_epochs, fid))
+            FIDS[id].append([cgan.trained_epochs, fid])
+
+            del images2, noise
+
+            if best_FID_10 > fid:
+                not_improved_since = 0
+                best_FID_10 = fid
+            else:
+                not_improved_since += 1
+
+            if not_improved_since >= 10:
+                break
 
     print("FIDs:")
     for num, fids in enumerate(FIDS):
