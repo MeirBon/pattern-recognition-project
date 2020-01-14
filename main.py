@@ -8,13 +8,15 @@ from tensorflow.keras.layers import UpSampling2D, Conv2D
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.applications.inception_v3 import InceptionV3, preprocess_input
-from os import path, mkdir, getcwd
+from os import path, mkdir, getcwd, mknod
 from skimage.transform import resize
+from scipy.linalg import sqrtm
+from datetime import datetime
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import sys
 import numpy as np
-from scipy.linalg import sqrtm
+import json
 
 sys.path.append(path.join(getcwd(), 'utils'))
 
@@ -202,7 +204,8 @@ class CGAN():
                 g_loss = self.combined.train_on_batch([noise, sampled_labels], valid)
 
                 # Plot the progress
-                print("%d (%d) [D-loss: %f, acc: %.2f%%] [G-loss: %f]" % (self.trained_epochs, i, d_loss[0], 100 * d_loss[1], g_loss))
+                print("%d (%d) [D-loss: %f, acc: %.2f%%] [G-loss: %f]" % (
+                    self.trained_epochs, i, d_loss[0], 100 * d_loss[1], g_loss))
 
             self.trained_epochs += 1
 
@@ -232,7 +235,7 @@ class CGAN():
 
 
 if __name__ == '__main__':
-    FIDS = [[] for i in range(3)]
+    FIDs = [[] for i in range(3)]
 
     compare_FIDs = True
     numgen = 1000
@@ -253,7 +256,7 @@ if __name__ == '__main__':
         not_improved_since = 0
         best_FID_10 = 99999
 
-        while cgan.trained_epochs < 200:
+        while cgan.trained_epochs < 500:
             cgan.train(epochs=1, batch_size=128, sample_interval=1)
 
             print('generating {} images'.format(numgen))
@@ -274,7 +277,7 @@ if __name__ == '__main__':
             # calculate fid
             fid = calculate_fid(model, test_images, images2)
             print('Epochs: %i, FID: %.3f' % (cgan.trained_epochs, fid))
-            FIDS[id].append([cgan.trained_epochs, fid])
+            FIDs[id].append([cgan.trained_epochs, fid])
 
             del images2, noise
 
@@ -288,7 +291,13 @@ if __name__ == '__main__':
                 break
 
     print("FIDs:")
-    for num, fids in enumerate(FIDS):
+    for num, fids in enumerate(FIDs):
         print('Network (%i):' % num)
         for epochs, fid in fids:
             print("Epochs: %i, FID: %.3f" % (epochs, fid))
+
+    file_id = datetime.now().strftime("results-%d-%m-%Y:%H:%M:%S.json")
+    file_path = path.join(getcwd(), file_id)
+
+    with open(file_path, 'w') as output:
+        json.dump(FIDs, output)

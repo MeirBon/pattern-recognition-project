@@ -303,3 +303,4 @@ pip-selfcheck.json
 
 /.idea/
 /images/
+results*
