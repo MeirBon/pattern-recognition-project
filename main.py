@@ -243,6 +243,10 @@ if __name__ == '__main__':
     print('converting images to float32')
     images1 = images1.astype('float32')
 
+    # prepare the inception v3 model
+    print('prepare inception v3 model for Frechet Inception Distance')
+    model = InceptionV3(include_top=False, pooling='avg', input_shape=(299, 299, 3))
+
     for id in range(3):
         cgan = CGAN(str(id))
 
@@ -256,10 +260,6 @@ if __name__ == '__main__':
             noise = np.random.normal(loc=0, scale=1, size=(numgen, CGAN.LATENT_DIM))
             sampled_labels = np.arange(0, numgen).reshape(-1, 1)
             images2 = cgan.generator.predict([noise, sampled_labels])
-
-            # prepare the inception v3 model
-            print('prepare inception v3 model for Frechet Inception Distance')
-            model = InceptionV3(include_top=False, pooling='avg', input_shape=(299, 299, 3))
 
             print('resizing images')
             np.random.shuffle(images1)
