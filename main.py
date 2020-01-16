@@ -8,7 +8,7 @@ from tensorflow.keras.layers import UpSampling2D, Conv2D
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.applications.inception_v3 import InceptionV3, preprocess_input
-from os import path, mkdir, getcwd, mknod
+from os import path, mkdir, getcwd
 from skimage.transform import resize
 from scipy.linalg import sqrtm
 from datetime import datetime
@@ -59,14 +59,13 @@ class CGAN():
     LATENT_DIM = 200
     NUM_CLASSES = 10
 
-    def __init__(self, id="", learning_rate=0.0002, beta_1=0.5, use_dropout_layers=True, use_batch_norm=True,
+    def __init__(self, learning_rate=0.0002, beta_1=0.5, use_dropout_layers=True, use_batch_norm=True,
                  use_leaky_relu=True):
         self.batch_norm = use_batch_norm
         self.dropout_layers = use_dropout_layers
         self.leaky_relu = use_leaky_relu
         # Input shape
         self.trained_epochs = 0
-        self.id = id
         self.img_rows = 32
         self.img_cols = 32
         self.channels = 3
@@ -251,7 +250,7 @@ class CGAN():
                 cnt += 1
         fig.suptitle('epochs = ' + str(self.trained_epochs))
         fig.savefig(path.join(getcwd(), 'images',
-                              "cgan[{}]_cifar10_dout={}_lrelu={}_%d_%d.png".format(id, self.dropout_layers,
+                              "cgan_cifar10_dout={}_lrelu={}_%d_%d.png".format(self.dropout_layers,
                                                                                    self.leaky_relu) % (
                               CGAN.LATENT_DIM, self.trained_epochs)))
         plt.close()
@@ -292,7 +291,7 @@ if __name__ == '__main__':
         # for b1 in beta_1s:
         for use_relu in relu:
             # cgan = CGAN(str(id), lr, b1)
-            cgan = CGAN(str(id), use_dropout_layers=use_dropout, use_leaky_relu=use_relu)
+            cgan = CGAN(use_dropout_layers=use_dropout, use_leaky_relu=use_relu)
             not_improved_since = 0
             best_FID_10 = 99999
 
@@ -330,7 +329,7 @@ if __name__ == '__main__':
                 if not_improved_since >= early_stopping_count:
                     break
 
-    file_id = datetime.now().strftime("results-%d-%m-%Y:%H:%M:%S.json")
+    file_id = datetime.now().strftime("results-%d-%m_%Y-%H-%M-%S.json")
     file_path = path.join(getcwd(), file_id)
 
     with open(file_path, 'w') as output:
