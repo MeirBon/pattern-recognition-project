@@ -3,7 +3,7 @@ from __future__ import print_function, division
 from keras.datasets import cifar10
 from tensorflow.keras.layers import Input, Dense, Reshape, Flatten, Dropout, Concatenate
 from tensorflow.keras.layers import BatchNormalization, Activation, ZeroPadding2D, Embedding
-from tensorflow.keras.layers import LeakyReLU
+from tensorflow.keras.layers import LeakyReLU, ReLU
 from tensorflow.keras.layers import UpSampling2D, Conv2D
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
@@ -59,7 +59,11 @@ class CGAN():
     LATENT_DIM = 200
     NUM_CLASSES = 10
 
-    def __init__(self, id="", learning_rate=0.0002, beta_1=0.5):
+    def __init__(self, id="", learning_rate=0.0002, beta_1=0.5, use_dropout_layers=True, use_batch_norm=True,
+                 use_leaky_relu=True):
+        self.batch_norm = use_batch_norm
+        self.dropout_layers = use_dropout_layers
+        self.leaky_relu = use_leaky_relu
         # Input shape
         self.trained_epochs = 0
         self.id = id
@@ -107,18 +111,30 @@ class CGAN():
         x2 = Reshape((8, 8, 1))(x2)
 
         x = Concatenate()([x1, x2])
-        x = LeakyReLU(alpha=0.2)(x)
-        x = BatchNormalization(momentum=0.8)(x)
+        if self.leaky_relu:
+            x = LeakyReLU(alpha=0.2)(x)
+        else:
+            x = ReLU()(x)
+        if self.batch_norm:
+            x = BatchNormalization(momentum=0.8)(x)
 
         x = UpSampling2D()(x)  # Conv2DTranspose
         x = Conv2D(128, kernel_size=3, padding="same")(x)
-        x = LeakyReLU(alpha=0.2)(x)
-        x = BatchNormalization(momentum=0.8)(x)
+        if self.leaky_relu:
+            x = LeakyReLU(alpha=0.2)(x)
+        else:
+            x = ReLU()(x)
+        if self.batch_norm:
+            x = BatchNormalization(momentum=0.8)(x)
 
         x = UpSampling2D()(x)
         x = Conv2D(64, kernel_size=3, padding="same")(x)
-        x = LeakyReLU(alpha=0.2)(x)
-        x = BatchNormalization(momentum=0.8)(x)
+        if self.leaky_relu:
+            x = LeakyReLU(alpha=0.2)(x)
+        else:
+            x = ReLU()(x)
+        if self.batch_norm:
+            x = BatchNormalization(momentum=0.8)(x)
 
         x = Conv2D(self.channels, kernel_size=3, padding="same")(x)
         img = Activation("tanh")(x)
@@ -137,20 +153,24 @@ class CGAN():
 
         x = Conv2D(32, kernel_size=3, strides=2, input_shape=self.img_shape, padding="same")(x)
         x = LeakyReLU(alpha=0.2)(x)
-        x = Dropout(0.25)(x)  # 0.5
+        if self.dropout_layers:
+            x = Dropout(0.25)(x)  # 0.5
         x = Conv2D(64, kernel_size=3, strides=2, padding="same")(x)
         x = ZeroPadding2D(padding=((0, 1), (0, 1)))(x)
         x = BatchNormalization(momentum=0.8)(x)
         x = LeakyReLU(alpha=0.2)(x)
-        x = Dropout(0.25)(x)
+        if self.dropout_layers:
+            x = Dropout(0.25)(x)
         x = Conv2D(128, kernel_size=3, strides=2, padding="same")(x)
         x = BatchNormalization(momentum=0.8)(x)
         x = LeakyReLU(alpha=0.2)(x)
-        x = Dropout(0.25)(x)
+        if self.dropout_layers:
+            x = Dropout(0.25)(x)
         x = Conv2D(256, kernel_size=3, strides=1, padding="same")(x)
         x = BatchNormalization(momentum=0.8)(x)
         x = LeakyReLU(alpha=0.2)(x)
-        x = Dropout(0.25)(x)
+        if self.dropout_layers:
+            x = Dropout(0.25)(x)
         x = Flatten()(x)
         x = Dense(1, activation='sigmoid')(x)
 
@@ -229,17 +249,21 @@ class CGAN():
                 axs[i, j].title.set_text("SomeText")  # "t.categories[cnt])
                 axs[i, j].axis('off')
                 cnt += 1
-        fig.suptitle('epochs = ' + str(epoch))
-        fig.savefig(path.join(getcwd(), 'images', "cgan[{}]_cifar10_%d_%d.png".format(id) % (CGAN.LATENT_DIM, epoch)))
+        fig.suptitle('epochs = ' + str(self.trained_epochs))
+        fig.savefig(path.join(getcwd(), 'images',
+                              "cgan[{}]_cifar10_dout={}_lrelu={}_%d_%d.png".format(id, self.dropout_layers,
+                                                                                   self.leaky_relu) % (
+                              CGAN.LATENT_DIM, self.trained_epochs)))
         plt.close()
 
 
 if __name__ == '__main__':
-    FIDs = [[] for i in range(3)]
+    FIDs = dict()
 
     compare_FIDs = True
     numgen = 1000
     check_shape = (299, 299, 3)
+    early_stopping_count = 10
 
     print('load cifar10 images')
     (_, _), (images1, _) = cifar10.load_data()
@@ -250,56 +274,61 @@ if __name__ == '__main__':
     print('prepare inception v3 model for Frechet Inception Distance')
     model = InceptionV3(include_top=False, pooling='avg', input_shape=(299, 299, 3))
 
-    learning_rates = [0.0002, 0.0005, 0.001]
-    beta_1s = [0.5, 0.7, 0.9]
+    dropout = [True, False]
+    relu = [True, False]
 
-    for id in range(3):
-        for lr in learning_rates:
-            for b1 in beta_1s:
-                cgan = CGAN(str(id), lr, b1)
+    for dr in dropout:
+        FIDs[str(dr)] = dict()
+        for rl in relu:
+            FIDs[str(dr)][str(rl)] = []
 
-                not_improved_since = 0
-                best_FID_10 = 99999
+    # learning_rates = [0.0002, 0.0005, 0.001]
+    # beta_1s = [0.5, 0.7, 0.9]
 
-                while cgan.trained_epochs < 150:
-                    cgan.train(epochs=1, batch_size=128, sample_interval=1)
+    # for id in range(3):
 
-                    print('generating {} images'.format(numgen))
-                    noise = np.random.normal(loc=0, scale=1, size=(numgen, CGAN.LATENT_DIM))
-                    sampled_labels = np.arange(0, numgen).reshape(-1, 1)
-                    images2 = cgan.generator.predict([noise, sampled_labels])
+    # for lr in learning_rates:
+    for use_dropout in dropout:
+        # for b1 in beta_1s:
+        for use_relu in relu:
+            # cgan = CGAN(str(id), lr, b1)
+            cgan = CGAN(str(id), use_dropout_layers=use_dropout, use_leaky_relu=use_relu)
+            not_improved_since = 0
+            best_FID_10 = 99999
 
-                    print('resizing images')
-                    np.random.shuffle(images1)
-                    test_images = np.asarray([resize(image, check_shape, 0) for image in images1[:numgen]])
-                    images2 = np.asarray([resize(image, check_shape, 0) for image in ((0.5 * images2 + 0.5) * 255.0)])
+            while cgan.trained_epochs < 150:
+                cgan.train(epochs=1, batch_size=128, sample_interval=1)
 
-                    # pre-process images
-                    print('pre-processing images')
-                    test_images = preprocess_input(test_images)
-                    images2 = preprocess_input(images2)
+                print('generating {} images'.format(numgen))
+                noise = np.random.normal(loc=0, scale=1, size=(numgen, CGAN.LATENT_DIM))
+                sampled_labels = np.arange(0, numgen).reshape(-1, 1)
+                images2 = cgan.generator.predict([noise, sampled_labels])
 
-                    # calculate fid
-                    fid = calculate_fid(model, test_images, images2)
-                    print('Epochs: %i, FID: %.3f' % (cgan.trained_epochs, fid))
-                    FIDs[id].append([cgan.trained_epochs, fid])
+                print('resizing images')
+                np.random.shuffle(images1)
+                test_images = np.asarray([resize(image, check_shape, 0) for image in images1[:numgen]])
+                images2 = np.asarray([resize(image, check_shape, 0) for image in ((0.5 * images2 + 0.5) * 255.0)])
 
-                    del images2, noise
+                # pre-process images
+                print('pre-processing images')
+                test_images = preprocess_input(test_images)
+                images2 = preprocess_input(images2)
 
-                    if best_FID_10 > fid:
-                        not_improved_since = 0
-                        best_FID_10 = fid
-                    else:
-                        not_improved_since += 1
+                # calculate fid
+                fid = calculate_fid(model, test_images, images2)
+                print('Epochs: %i, FID: %.3f' % (cgan.trained_epochs, fid))
+                FIDs[str(use_dropout)][str(use_relu)].append([cgan.trained_epochs, fid])
 
-                    if not_improved_since >= 10:
-                        break
+                del images2, noise
 
-    print("FIDs:")
-    for num, fids in enumerate(FIDs):
-        print('Network (%i):' % num)
-        for epochs, fid in fids:
-            print("Epochs: %i, FID: %.3f" % (epochs, fid))
+                if best_FID_10 > fid:
+                    not_improved_since = 0
+                    best_FID_10 = fid
+                else:
+                    not_improved_since += 1
+
+                if not_improved_since >= early_stopping_count:
+                    break
 
     file_id = datetime.now().strftime("results-%d-%m-%Y:%H:%M:%S.json")
     file_path = path.join(getcwd(), file_id)
